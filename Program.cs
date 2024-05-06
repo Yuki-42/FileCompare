@@ -21,6 +21,9 @@ class Program
         new Program().Run(new Tuple<string, string>(args[0], args[1]));
     }
 
+    private FileOptions _options = (FileOptions)0x20000000;
+    private int _bufferSize = 512 * 8;
+
     private void Run(Tuple<string, string> paths)
     {
         // Get file objects
@@ -86,11 +89,12 @@ class Program
     /// <returns>Number of 4MB buffers needed to store a file</returns>
     private int CalculateBufferLength(long fileLength)
     {
+        Console.WriteLine("Calculating buffer length...");
         // Calculate the number of 4MB buffers needed to store the file
-        int bufferLength = (int)(fileLength / 4194304);
+        int bufferLength = (int)(fileLength / _bufferSize);
         
         // Check if there is a remainder
-        if (fileLength % 4194304 != 0)
+        if (fileLength % _bufferSize != 0)
         {
             bufferLength++;
         }
@@ -118,7 +122,8 @@ class Program
         
         // 1. Get the number of 4MB buffers needed to store the file.
         int bufferLength = CalculateBufferLength(file.Length);
-
+        Console.WriteLine($"File length: {file.Length}. Buffer length: {bufferLength}");
+        
         // 2. Create a list of byte arrays of the buffer length.
         List<byte[]?> buffers = new(bufferLength);
 
@@ -127,9 +132,11 @@ class Program
 
         // 4. Create a watcher to read the file data into the byte arrays while keeping track of the maximum memory used. Each time a buffer is filled, hand it off to a thread to hash the data.
         int buffersFilled = 0;
-        // ReSharper disable once CollectionNeverUpdated.Local
         List<Thread> threads = [];
         List<byte[]> hashes = [];
+        
+        // Create a remaining counter to keep track of how many buffers are left to hash
+        int remaining = bufferLength;
         
         // Create a loop that pauses when the number of buffers in memory is reached.
         for (int i = 0; i < bufferLength; i++)
@@ -140,13 +147,31 @@ class Program
             }
             
             // Create a buffer to store the file data
-            byte[]? buffer = new byte[4194304];
+            byte[]? buffer = new byte[_bufferSize];
             
             // Read the file data into the buffer
             using (FileStream stream = file.OpenRead())
             {
-                stream.Seek(i * 4194304, SeekOrigin.Begin);
-                stream.Read(buffer, 0, 4194304);
+                // This is throwing an IOException: The parameter is incorrect.  This is commonly caused by 
+                stream.Seek(i * _bufferSize, SeekOrigin.Begin);  // Seek to the correct position in the file first
+                
+                // Check if this is the last buffer
+                if (i == bufferLength - 1)
+                {
+                    // Calculate the length of the last buffer
+                    int lastBufferLength = (int)(file.Length % _bufferSize);
+                    
+                    // Create a new buffer with the correct length
+                    buffer = new byte[lastBufferLength];
+                    
+                    // Read to the end of the file
+                    stream.Read(buffer, 0, lastBufferLength);
+                }
+                else
+                {
+                    // Read the buffer
+                    stream.Read(buffer, 0, _bufferSize);
+                }
             }
             
             // Add the buffer to the list
